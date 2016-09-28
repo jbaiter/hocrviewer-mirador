@@ -5,13 +5,6 @@
 Read books in HOCR format with [Mirador](https://mirador-project.org).
 
 ## Requirements
-- Books in HOCR format with accompanying facsimile images
-    - The HOCR file must contain all pages as `ocr_page` elements that
-      reference the associated image as a relative path via the `image` value
-      in the `title` attribute and include the dimensions of the image via
-      the `bbox` value.
-    - The images should be in a format that is readable by
-      [Pillow](https://pillow.readthedocs.org)
 - Python 2.7
 - NodeJS with `npm` and `grunt` installed (for Mirador)
 
@@ -25,6 +18,20 @@ Read books in HOCR format with [Mirador](https://mirador-project.org).
     $ bower install
     $ grunt
     ```
+
+# Data format
+The **HOCR file** must contain all pages as `ocr_page` elements. These must have
+a `title` attribute that contains the following fields (as per the
+[HOCR Specification](http://kba.github.io/hocr-spec/1.2/)):
+    - `ppageno`: The physical page number
+    - `image`: The relative path (from the HOCR file) to the page image
+    - `bbox`: The dimensions of the image
+
+Example:
+```html
+<div class="ocr_page" id="page_0005"
+     title="ppageno 4; image spyri_heidi_1880/00000005.tif; bbox 0 0 2013 2985"/>
+```
 
 ## Usage
 Run `hocrviewer.py`, pass the path to the directory with the HOCR files as
