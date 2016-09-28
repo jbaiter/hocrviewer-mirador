@@ -9,15 +9,14 @@ Read books in HOCR format with [Mirador](https://mirador-project.org).
 - NodeJS with `npm` and `grunt` installed (for Mirador)
 
 # Installation
-- Install all Python dependencies with `pip install -r requirements.txt`
-- Fetch and build Mirador:
-    ```bash
-    $ git submodule update --init --recursive vendor/mirador`
-    $ cd vendor/mirador
-    $ npm install
-    $ bower install
-    $ grunt
-    ```
+```bash
+$ pip install -r requirements.txt
+$ git submodule update --init --recursive vendor/mirador
+$ cd vendor/mirador
+$ npm install
+$ bower install
+$ grunt
+```
 
 # Data format
 The **HOCR file** must contain all pages as `ocr_page` elements. These must have
