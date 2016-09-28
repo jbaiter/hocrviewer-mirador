@@ -1,0 +1,3 @@
+[submodule "mirador"]
+	path = vendor/mirador
+	url = https://github.com/projectmirador/mirador
