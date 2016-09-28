@@ -1,6 +1,6 @@
 # HOCRViewer
 
-[![Demo](https://thumbs.gfycat.com/TameThornyAsianpiedstarling-size_restricted.gif)][https://gfycat.com/TameThornyAsianpiedstarling]
+[![Demo](https://thumbs.gfycat.com/TameThornyAsianpiedstarling-size_restricted.gif)](https://gfycat.com/TameThornyAsianpiedstarling)
 
 Read books in HOCR format with [Mirador](https://mirador-project.org).
 
