@@ -1,10 +1,13 @@
 from __future__ import print_function
 
+import logging
 import os
 import sys
 from collections import OrderedDict
 from multiprocessing import cpu_count
 
+import click
+import click_log
 import flask
 import gunicorn.app.base
 import lxml.etree
@@ -199,7 +202,11 @@ def build_manifest(book):
             base_url + flask.url_for('get_page_lines', book_id=book.id,
                                      page_id=page_id),
             label="Transcribed Text")
-    return manifest
+    if not seq.canvases:
+        logger.error("{} has no images!".format(book.hocr_path))
+        return None
+    else:
+        return manifest
 
 
 def get_canvas_id(book_id, page_id):
@@ -252,10 +259,18 @@ def index():
                                  book_ids=repository.book_ids())
 
 
+@click.command()
+@click_log.simple_verbosity_option()
+@click_log.init(__name__)
+@click.argument('hocr-directory', type=click.Path(file_okay=False, exists=True,
+                                                  readable=True))
+@click.option('-u', '--base-url', default='http://127.0.0.1:5000',
+              help='HTTP URL where the application is reachable')
+def cli(hocr_directory, base_url):
+    global repository
+    repository = HocrRepository(hocr_directory)
+    HocrViewerApplication(app, hocr_directory, base_url).run()
+
+
 if __name__ == '__main__':
-    base_dir = sys.argv[1]
-    if len(sys.argv) > 2:
-        base_url = sys.argv[2]
-    else:
-        base_url = 'http://localhost:5000'
-    HocrViewerApplication(app, base_dir, base_url).run()
+    cli()
