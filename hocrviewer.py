@@ -1,7 +1,6 @@
 from __future__ import print_function
 
 import os
-import re
 import sys
 from collections import OrderedDict
 from multiprocessing import cpu_count
@@ -16,6 +15,9 @@ from iiif_prezi.factory import ManifestFactory
 from PIL import Image
 
 NAMESPACES = {'xhtml': 'http://www.w3.org/1999/xhtml'}
+XPATH_PAGE = ".//xhtml:div[@class='ocr_page']"
+XPATH_LINE = ".//xhtml:span[@class='ocr_line']"
+XPATH_WORD = ".//xhtml:span[@class='ocr_cinfo']"
 
 
 app = flask.Flask('hocrviewer', static_folder='vendor/mirador/build/mirador',
@@ -23,12 +25,49 @@ app = flask.Flask('hocrviewer', static_folder='vendor/mirador/build/mirador',
 ext = IIIF(app=app)
 api = Api(app=app)
 ext.init_restful(api, prefix="/iiif/image/")
-book_cache = {}
-image_locator = None
+repository = None
+logger = logging.getLogger(__name__)
+
+
+class HocrRepository(object):
+    cache = {}
+
+    def __init__(self, base_directory, init_cache=True):
+        self.logger = logger.getChild('HocrRepository')
+        self.base_dir = base_directory
+        self.logger.info("Initializing book cache")
+        book_ids = [p[:-5] for p in os.listdir(base_directory)
+                    if p.endswith('.html')]
+        for idx, book_id in enumerate(book_ids):
+            self.logger.debug(
+                "Read {} ({}/{})".format(book_id, idx, len(book_ids)))
+            try:
+                self.get(book_id)
+            except:
+                logger.warn("Could not parse {}".format(book_id))
+
+    def get(self, book_id):
+        if book_id in self.cache:
+            book = self.cache[book_id]
+        else:
+            self.logger.debug('Cache miss, reading HOCR from disk')
+            hocr_path = os.path.join(self.base_dir, book_id + '.html')
+            if not os.path.exists(hocr_path):
+                self.logger.warn('HOCR file {} does not exist.'
+                                 .format(hocr_path))
+                return None
+            book = HocrDocument(book_id, hocr_path)
+            self.cache[book_id] = book
+        return book
+
+    def book_ids(self):
+        return [p[:-5] for p in os.listdir(self.base_dir)
+                if p.endswith('.html')]
 
 
 class HocrDocument(object):
     def __init__(self, book_id, hocr_path):
+        self.logger = logger.getChild('HocrDocument')
         self.id = book_id
         self.hocr_path = hocr_path
         self._images = OrderedDict()
@@ -40,63 +79,79 @@ class HocrDocument(object):
         return {itm.split(" ")[0]: " ".join(itm.split(" ")[1:])
                 for itm in title.split("; ")}
 
+    def get_image_path(self, page_id):
+        if not self._images:
+            list(self.get_images())
+        return self._images[page_id][1]
+
     def get_images(self):
         if self._images:
             for page_id, data in self._images.items():
                 dimensions, fpath = data
                 yield page_id, dimensions, fpath
         else:
-            tree = lxml.etree.parse(self.hocr_path)
-            for page_node in tree.findall(".//xhtml:div[@class='ocr_page']",
-                                          namespaces=NAMESPACES):
+            self.logger.debug("Cache miss while getting images for {}"
+                              .format(self.hocr_path))
+            try:
+                tree = lxml.etree.parse(self.hocr_path)
+            except lxml.etree.XMLSyntaxError as e:
+                self.logger.error("Error during parsing of {}"
+                                  .format(self.hocr_path))
+                self.logger.exception(e)
+                raise StopIteration
+            for page_node in tree.iterfind(XPATH_PAGE, namespaces=NAMESPACES):
                 title_data = self._parse_title(page_node.attrib.get('title'))
                 if title_data is None or 'image' not in title_data:
+                    self.logger.warn(
+                        "Could not parse title data for page with id={} "
+                        "on book {}"
+                        .format(page_node.attrib.get('id'), self.hocr_path))
                     continue
-                img_path = os.path.join(os.path.dirname(self.hocr_path),
-                                        title_data['image'])
+                img_path = os.path.realpath(
+                        os.path.join(os.path.dirname(self.hocr_path),
+                                     title_data['image']))
                 if 'bbox' not in title_data:
                     dimensions = Image.open(img_path).size
                 else:
                     dimensions = [
                         int(x) for x in title_data['bbox'].split()[2:]]
-                page_id = page_node.attrib['id'].split('_')[1]
+                page_id = page_node.attrib['id']
                 self._images[page_id] = (dimensions, img_path)
                 yield page_id, dimensions, img_path
 
     def get_lines(self, page_id):
-        if page_id in self._lines:
+        if self._lines:
             for bbox, text in self._lines[page_id]:
                 yield bbox, text
         else:
+            self.logger.debug("Cache miss while getting lines for {}"
+                              .format(self.hocr_path))
             tree = lxml.etree.parse(self.hocr_path)
-            self._lines[page_id] = []
-            xpath = (".//xhtml:div[@class='ocr_page'][@id='page_{:04}']/"
-                     "xhtml:span[@class='ocr_line']".format(int(page_id)))
-            line_nodes = tree.findall(xpath, namespaces=NAMESPACES)
-            for line_node in line_nodes:
-                title_data = self._parse_title(line_node.attrib.get('title'))
-                if title_data is None:
-                    continue
-                bbox = [int(v) for v in title_data['bbox'].split()]
-                text = "".join(line_node.itertext())
-                self._lines[page_id].append((bbox, text))
-                yield bbox, text
+            for page_node in tree.iterfind(XPATH_PAGE, namespaces=NAMESPACES):
+                page_id = page_node.attrib.get('id')
+                self._lines[page_id] = []
+                line_nodes = page_node.iterfind(XPATH_LINE,
+                                                namespaces=NAMESPACES)
+                for line_node in line_nodes:
+                    title_data = self._parse_title(
+                        line_node.attrib.get('title'))
+                    if title_data is None:
+                        self.logger.warn(
+                            "Could not parse title data for line with id={} "
+                            "on page with id={} on book {}"
+                            .format(line_node.attrib.get('id'), page_id,
+                                    self.hocr_path))
+                        continue
+                    bbox = [int(v) for v in title_data['bbox'].split()]
+                    text = "".join(line_node.itertext())
+                    self._lines[page_id].append((bbox, text))
+                    yield bbox, text
 
 
-class ImageLocator(object):
-    def __init__(self, base_directory=None):
-        self.base_dir = base_directory
-
-    def __call__(self, uid):
-        if self.base_dir is None:
-            raise ValueError("Please set base_dir first!")
-        image_dir, pageno = re.findall(r'^(.*)_(\d+)$', uid)[0]
-        pageno = int(pageno) + 1
-        image_dir = os.path.join(self.base_dir, image_dir)
-        for fname in os.listdir(image_dir):
-            stem, ext = os.path.splitext(fname)
-            if stem.isdigit() and int(stem) == pageno and ext != '.tif':
-                return os.path.join(image_dir, fname)
+def locate_image(uid):
+    book_id, page_id = uid.split(':')
+    book = repository.get(book_id)
+    return book.get_image_path(page_id)
 
 
 class HocrViewerApplication(gunicorn.app.base.BaseApplication):
@@ -107,9 +162,7 @@ class HocrViewerApplication(gunicorn.app.base.BaseApplication):
         app.config['IIIF_CACHE_HANDLER'] = ImageSimpleCache()
         app.config['BASE_DIR'] = base_dir
         app.config['BASE_URL'] = base_url
-        image_locator = ImageLocator(base_dir)
-        ext.uuid_to_image_opener_handler(image_locator)
-        self.init_cache()
+        ext.uuid_to_image_opener_handler(locate_image)
         super(HocrViewerApplication, self).__init__()
 
     def load_config(self):
@@ -117,19 +170,6 @@ class HocrViewerApplication(gunicorn.app.base.BaseApplication):
                        if key in self.cfg.settings and value is not None])
         for key, value in config.items():
             self.cfg.set(key.lower(), value)
-
-    def init_cache(self):
-        print("Initializing book cache")
-        book_ids = [p[:-5] for p in os.listdir(app.config['BASE_DIR'])
-                    if p.endswith('.html')]
-        for idx, book_id in enumerate(book_ids):
-            sys.stdout.write("{}/{}\r".format(idx, len(book_ids)))
-            sys.stdout.flush()
-            try:
-                get_document(book_id)
-            except:
-                print("Could not parse {}".format(book_id))
-
 
     def load(self):
         return self.application
@@ -151,7 +191,7 @@ def build_manifest(book):
         canvas = seq.canvas(ident=page_id,
                             label='Page {}'.format(idx))
         anno = canvas.annotation(ident=page_id)
-        img = anno.image('{}_{}'.format(book.id, idx), iiif=True)
+        img = anno.image('{}:{}'.format(book.id, page_id), iiif=True)
         img.set_hw(dimensions[1], dimensions[0])
         canvas.height = img.height
         canvas.width = img.width
@@ -168,33 +208,23 @@ def get_canvas_id(book_id, page_id):
             '/canvas/' + page_id + '.json')
 
 
-def get_document(book_id):
-    if book_id in book_cache:
-        book = book_cache[book_id]
-    else:
-        hocr_path = os.path.join(app.config['BASE_DIR'], book_id + '.html')
-        if not os.path.exists(hocr_path):
-            return None
-        book = HocrDocument(book_id, hocr_path)
-        book_cache[book_id] = book
-    return book
-
-
 @app.route("/iiif/<book_id>")
 def get_book_manifest(book_id):
-    doc = get_document(book_id)
+    doc = repository.get(book_id)
     if doc is None:
         flask.abort(404)
-    return flask.jsonify(build_manifest(doc).toJSON(top=True))
+    manifest = build_manifest(doc)
+    if manifest is None:
+        flask.abort(500)
+    return flask.jsonify(manifest.toJSON(top=True))
 
 
 @app.route("/iiif/<book_id>/list/<page_id>", methods=['GET'])
 @app.route("/iiif/<book_id>/list/<page_id>.json", methods=['GET'])
 def get_page_lines(book_id, page_id):
-    book = get_document(book_id)
+    book = repository.get(book_id)
     lines = book.get_lines(page_id)
 
-    fac = ManifestFactory()
     fac = ManifestFactory()
     base_url = app.config.get('BASE_URL', 'http://localhost:5000')
     fac.set_base_metadata_uri(base_url + '/iiif/' + book_id)
@@ -209,16 +239,17 @@ def get_page_lines(book_id, page_id):
         anno.on = (get_canvas_id(book_id, page_id) +
                    "#xywh={},{},{},{}".format(ulx, uly, width, height))
     out_data = annotation_list.toJSON(top=True)
-    #if not annotation_list.resources:
+    if not annotation_list.resources:
         # NOTE: iiif-prezi strips empty list from the resulting JSON,
         #       so we have to add the empty list ourselves...
-    #    out_data['resources'] = []
+        out_data['resources'] = []
     return flask.jsonify(out_data)
 
 
 @app.route('/')
 def index():
-    return flask.render_template('mirador.html', book_ids=book_cache.keys())
+    return flask.render_template('mirador.html',
+                                 book_ids=repository.book_ids())
 
 
 if __name__ == '__main__':
