@@ -8,7 +8,7 @@ Read books in HOCR format with [Mirador](https://mirador-project.org).
 - Python 2.7
 - NodeJS with `npm` and `grunt` installed (for Mirador)
 
-# Installation
+## Installation
 ```bash
 $ pip install -r requirements.txt
 $ git submodule update --init --recursive vendor/mirador
@@ -18,13 +18,17 @@ $ bower install
 $ grunt
 ```
 
-# Data format
+## Data format
 The **HOCR file** must contain all pages as `ocr_page` elements. These must have
 a `title` attribute that contains the following fields (as per the
 [HOCR Specification](http://kba.github.io/hocr-spec/1.2/)):
-    - `ppageno`: The physical page number
-    - `image`: The relative path (from the HOCR file) to the page image
-    - `bbox`: The dimensions of the image
+
+- `ppageno`: The physical page number
+- `image`: The relative path (from the HOCR file) to the page image
+- `bbox`: The dimensions of the image
+
+Additionally, each `ocr_page` element must have a `title` attribute that
+assigns a unique identifier to the page.
 
 Example:
 ```html
