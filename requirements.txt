@@ -1,0 +1,7 @@
+Flask
+Flask-IIIF
+gunicorn
+iiif-prezi
+lxml
+click
+click-log
