@@ -6,7 +6,7 @@ Read books in HOCR format with [Mirador](https://mirador-project.org).
 
 ## Requirements
 - Python 2.7
-- NodeJS with `npm` and `grunt` installed (for Mirador)
+- NodeJS with `npm`, `bower` and `grunt` installed (for Mirador)
 
 ## Installation
 ```bash
@@ -27,7 +27,7 @@ a `title` attribute that contains the following fields (as per the
 - `image`: The relative path (from the HOCR file) to the page image
 - `bbox`: The dimensions of the image
 
-Additionally, each `ocr_page` element must have a `title` attribute that
+Additionally, each `ocr_page` element must have an `id` attribute that
 assigns a unique identifier to the page.
 
 Example:
@@ -38,11 +38,13 @@ Example:
 
 ## Usage
 Run `hocrviewer.py`, pass the path to the directory with the HOCR files as
-the first parameter and the host and port that the application is available
-at as the second parameter:
+the sole argument. If you want to expose the server on an a host other than
+`127.0.0.1:5000` (e.g. because you're using a reverse proxy), set the 
+`--base-url` option to the full HTTP URL the service is exposed at
+(e.g. `http://example.com/hocrviewer`).
 
 ```bash
-$ python hocrviewer.py /mnt/data/hocr "http://127.0.0.1:5000"
+$ python hocrviewer.py /mnt/data/hocr
 ```
 
 The application exposes all books as [IIIF](https://iiif.io) manifests at
