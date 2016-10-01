@@ -37,14 +37,29 @@ Example:
 ```
 
 ## Usage
-Run `hocrviewer.py`, pass the path to the directory with the HOCR files as
-the sole argument. If you want to expose the server on an a host other than
-`127.0.0.1:5000` (e.g. because you're using a reverse proxy), set the 
-`--base-url` option to the full HTTP URL the service is exposed at
-(e.g. `http://example.com/hocrviewer`).
+Before the web application can be run, the HOCR files that content is to be
+served from, have to be indexed. This is for two reasons: To make the
+response times for the manifests and annotations bearable and to enable
+the search within the books (to be implemented).
+
+To do so, run the `index` subcommand with the path to the directory with
+your HOCR  files as the first argument. By default, the database will be
+written to `~/.config/hocrviewer/hocrviewer.db`, but you can override this
+with the `--db-path` option that is passed *before* the subcommand:
 
 ```bash
-$ python hocrviewer.py /mnt/data/hocr
+$  python hocrviewer.py --db-path /tmp/test.db index /mnt/data/hocr
+```
+
+After the index has been created, run the application with the `run` subcommand
+(making sure that you pass the same `--db-path` value as during indexing).
+If you want to expose the application on an URL other than
+`http://127.0.0.1:5000` (e.g. because you're using a reverse proxy), specify
+the full URL that is to be externally visible with the `--base-url` option
+(e.g. `--base-url http://example.com/hocrviewer`).
+
+```bash
+$ python hocrviewer.py --db-path /tmp/test.db run --base-url "http://127.0.0.1:5000"
 ```
 
 The application exposes all books as [IIIF](https://iiif.io) manifests at
