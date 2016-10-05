@@ -2,6 +2,8 @@ from __future__ import print_function
 
 import logging
 import pathlib
+from collections import namedtuple
+from itertools import chain
 from multiprocessing import cpu_count
 
 import click
@@ -14,6 +16,9 @@ from flask_restful import Api
 from iiif_prezi.factory import ManifestFactory
 
 from index import DocumentRepository
+
+SearchHit = namedtuple("SearchHit",
+                       ("match", "before", "after", "annotations"))
 
 
 app = flask.Flask('hocrviewer', static_folder='vendor/mirador/build/mirador',
@@ -52,7 +57,7 @@ class HocrViewerApplication(gunicorn.app.base.BaseApplication):
 
 def build_manifest(book_id, book_path, metadata, pages):
     fac = ManifestFactory()
-    base_url = app.config.get('BASE_URL', 'http://localhost:5000')
+    base_url = app.config.get('BASE_URL')
     fac.set_base_metadata_uri(
         base_url + flask.url_for('get_book_manifest', book_id=book_id))
     fac.set_base_image_uri(base_url + '/iiif/image/v2')
@@ -82,7 +87,7 @@ def build_manifest(book_id, book_path, metadata, pages):
 def get_canvas_id(book_id, page_id):
     base_url = app.config.get('BASE_URL', 'http://localhost:5000')
     return (base_url + flask.url_for('get_book_manifest', book_id=book_id) +
-            '/canvas/' + page_id + '.json')
+            '/canvas/' + page_id)
 
 
 @app.route("/iiif/<book_id>")
@@ -91,7 +96,7 @@ def get_book_manifest(book_id):
     pages = repository.get_pages(book_id)
     if not doc:
         flask.abort(404)
-    manifest = build_manifest(*doc, pages)
+    manifest = build_manifest(*doc, pages=pages)
     if manifest is None:
         flask.abort(500)
     return flask.jsonify(manifest.toJSON(top=True))
@@ -117,6 +122,92 @@ def get_page_lines(book_id, page_id):
         #       so we have to add the empty list ourselves...
         out_data['resources'] = []
     return flask.jsonify(out_data)
+
+
+@app.route("/iiif/<book_id>/search", methods=['GET'])
+def search_in_book(book_id):
+    base_url = app.config['BASE_URL']
+    query = flask.request.args.get('q')
+    out = {
+        '@context': [
+            'http://iiif.io/api/presentation/2/context.json',
+            'http://iiif.io/api/search/1/context.json'],
+        '@id': (base_url + flask.url_for('search_in_book',
+                                         book_id=book_id) + '?q=' + query),
+        '@type': 'sc:AnnotationList',
+
+        'within': {
+            '@type': 'sc:Layer',
+            'ignored': [k for k in flask.request.args.keys() if k != 'q']
+        },
+
+        'resources': [],
+        'hits': []}
+
+    for page_id, match_text, line_infos in repository.search(query, book_id):
+        match_text = match_text.split()
+        start_idxs = [idx for idx, word in enumerate(match_text)
+                      if "<hi>" in word]
+        end_idxs = [idx for idx, word in enumerate(match_text)
+                    if "</hi>" in word]
+        for start_idx, end_idx in zip(start_idxs, end_idxs):
+            match = " ".join(match_text[start_idx:end_idx+1])
+            match = match.replace("<hi>", "").replace("</hi>", "")
+            before = "..." + " ".join(
+                match_text[max(0, start_idx-8):start_idx]),
+            after = " ".join(match_text[end_idx+1:end_idx+9]) + "..."
+            hit = SearchHit(match=match, before=before, after=after,
+                            annotations=[])
+            match_words = chain.from_iterable(
+                ((match_text[w.sequence_pos], w.sequence_pos,
+                  w.start_x, l.y_pos, w.end_x - w.start_x, l.height)
+                 for w in winfos if start_idx <= w.sequence_pos <= end_idx)
+                for l, winfos in line_infos)
+            for chars, pos, x, y, w, h in match_words:
+                anno = {
+                    '@id': "/".join((get_canvas_id(book_id, page_id),
+                                     'words', str(pos))),
+                    '@type': 'oa:Annotation',
+                    'motivation': 'sc:Painting',
+                    'resource': {
+                        '@type': 'cnt:ContentAsText',
+                        'chars': (chars.replace('<hi>', '')
+                                       .replace('</hi>', ''))},
+                    'on': (get_canvas_id(book_id, page_id) +
+                           "#xywh={},{},{},{}".format(x, y, w, h))}
+                hit.annotations.append(anno['@id'])
+                out['resources'].append(anno)
+            out['hits'].append({
+                '@type': 'sc:Hit',
+                'annotations': hit.annotations,
+                'match': hit.match,
+                'before': hit.before,
+                'after': hit.after})
+    return flask.jsonify(out)
+
+
+@app.route("/iiif/<book_id>/autocomplete", methods=['GET'])
+def autocomplete_in_book(book_id):
+    base_url = app.config['BASE_URL']
+    query = flask.request.args.get('q')
+    min_cnt = int(flask.request.args.get('min', '1'))
+    out = {
+        "@context": "http://iiif.io/api/search/1/context.json",
+        "@id": (base_url +
+                flask.url_for('autocomplete_in_book', book_id=book_id) +
+                "?q=" + query + ('&min=' + min_cnt if min_cnt > 1 else '')),
+        "@type": "search:TermList",
+        "ignored": [k for k in flask.request.args.keys()
+                    if k not in ('q', 'min')],
+        "terms": []}
+    for term, cnt in repository.autocomplete(query, book_id, min_cnt):
+        out['terms'].append({
+            'match': term,
+            'count': cnt,
+            'url': (base_url +
+                    flask.url_for('search_in_book', book_id=book_id) +
+                    '?q=' + term)})
+    return flask.jsonify(out)
 
 
 @app.route('/')

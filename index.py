@@ -1,7 +1,12 @@
+import gzip
+import json
 import logging
 import re
 import sqlite3
+from collections import Counter, namedtuple
 from contextlib import contextmanager
+from functools import lru_cache
+from itertools import count
 
 import lxml.etree
 from PIL import Image
@@ -10,6 +15,9 @@ NAMESPACES = {'xhtml': 'http://www.w3.org/1999/xhtml'}
 XPATH_PAGE = ".//xhtml:div[@class='ocr_page']"
 XPATH_LINE = ".//xhtml:span[@class='ocr_line']"
 XPATH_WORD = ".//xhtml:span[@class='ocr_cinfo']"
+
+LineInfo = namedtuple('LineInfo', ('y_pos', 'height', 'sequence_pos'))
+WordInfo = namedtuple('WordInfo', ('sequence_pos', 'start_x', 'end_x'))
 
 logger = logging.getLogger(__name__)
 
@@ -46,15 +54,21 @@ SCHEMA = """
         metadata    TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS lexica (
+        id          INTEGER PRIMARY KEY,
+        document_id TEXT UNIQUE,
+        counter     BLOB
+    );
+
     CREATE VIRTUAL TABLE text_idx USING fts5 (
         text,
         word_infos  UNINDEXED,
         page_id     UNINDEXED,
         document_id UNINDEXED,
-        prefix='2,3',
+        prefix='2 3',
         tokenize='porter unicode61 remove_diacritics 1'
     );
-    CREATE VIRTUAL TABLE text_idx_vocab USING fts5vocab(text_idx, row);
+    CREATE VIRTUAL TABLE text_vocab USING fts5vocab(text_idx, col);
 """
 INSERT_DOCUMENT = """
     INSERT INTO documents (document_id, filename, metadata)
@@ -73,33 +87,21 @@ INSERT_TRANSCRIPTION = """
                 :pos_x, :pos_y, :width, :height);
 """
 SEARCH_INSIDE = """
-    SELECT page_id, document_id, text, word_infos, rank AS score FROM text_idx
+    SELECT page_id, highlight(text_idx, 0, '<hi>', '</hi>'),
+           word_infos, rank AS score FROM text_idx
         WHERE text_idx MATCH :query AND document_id = :document_id
-        LIMIT :limit
-        ORDER BY score;
+        ORDER BY score
+        LIMIT :limit;
 """
-UPDATE_INDEX_FULL = """
+UPDATE_INDEX_SINGLE_DOCUMENT = """
     INSERT INTO text_idx (document_id, page_id, text, word_infos)
         SELECT document_id, page_id,
                group_concat(text, ' ') AS text,
                group_concat(word_infos, ' ') AS word_infos
         FROM (SELECT
                 document_id, page_id, text,
-                (word_cuts || ':' || pos_y ||
-                 ':' || height || ':' || position) AS word_infos
-              FROM transcriptions
-              ORDER BY document_id, page_id, position)
-        GROUP BY document_id, page_id;
-"""
-UPDATE_INDEX_SINGLE_DOCUMENT = """
-    INSERT INTO text_idx (page_id, text, word_infos)
-        SELECT page_id,
-               group_concat(text, ' ') AS text,
-               group_concat(word_infos, ' ') AS word_infos
-        FROM (SELECT
-                page_id, text,
-                (word_cuts || ':' || pos_y ||
-                 ':' || height || ':' || position) AS word_infos
+                (word_cuts || '|' || pos_y ||
+                 ':' || height || ':' || position || '||') AS word_infos
               FROM transcriptions
               WHERE document_id = :document_id
               ORDER BY page_id, position)
@@ -144,6 +146,7 @@ class HocrDocument(object):
             page_id = page_node.attrib.get('id')
             lines = []
             line_nodes = page_node.iterfind(XPATH_LINE, namespaces=NAMESPACES)
+            word_idx_gen = (str(v) for v in count())
             for line_node in line_nodes:
                 title_data = self._parse_title(
                     line_node.attrib.get('title'))
@@ -164,9 +167,10 @@ class HocrDocument(object):
                         word_node.attrib.get('title'))
                     if title_data:
                         word_bbox = title_data['bbox'].split()
-                        word_cuts.append((word_bbox[0], word_bbox[2]))
+                        word_cuts.append((next(word_idx_gen), word_bbox[0],
+                                          word_bbox[2]))
                     else:
-                        word_cuts.append(("-1", "-1"))
+                        word_cuts.append((next(word_idx_gen), "-1", "-1"))
                 text = re.sub(r'\s{2,}', ' ',
                               "".join(line_node.itertext()).strip())
                 if text:
@@ -193,6 +197,13 @@ class DocumentRepository(object):
         with sqlite3.connect(str(self.db_path)) as conn:
             cursor = conn.cursor()
             yield cursor
+
+    @lru_cache(5)
+    def _get_term_frequencies(self, document_id):
+        with self._db as cur:
+            return Counter(json.loads(gzip.decompress(
+                cur.execute("SELECT counter FROM lexica WHERE document_id = ?",
+                            (document_id,)).fetchone()[0]).decode('utf8')))
 
     def document_ids(self):
         with self._db as cur:
@@ -268,9 +279,25 @@ class DocumentRepository(object):
                     for pos, ((x1, y1, x2, y2), word_cuts, line_text)
                     in enumerate(lines))
                 cur.executemany(INSERT_TRANSCRIPTION, line_vals)
-            cur.execute(UPDATE_INDEX_SINGLE_DOCUMENT, {'document_id': doc_id})
 
-    def search(self, query, document_id=None, limit=None):
+            # FIXME: This is a bit unwiedly and I'd prefer there was a nicely
+            #        scalable in-SQL solution, but unfortunately keeping the
+            #        term frequencies for each document in a table makes
+            #        the database size explode :/
+            terms_before = Counter(dict(
+                cur.execute("SELECT term, cnt FROM text_vocab").fetchall()))
+            cur.execute(UPDATE_INDEX_SINGLE_DOCUMENT, {'document_id': doc_id})
+            terms_after = Counter(dict(
+                cur.execute("SELECT term, cnt FROM text_vocab").fetchall()))
+            doc_terms = Counter(dict(
+                (term, cnt_after - terms_before.get('term', 0))
+                for term, cnt_after in terms_after.items()
+                if cnt_after != terms_before.get('term')))
+            cur.execute(
+                "INSERT INTO lexica (document_id, counter) VALUES (?, ?)",
+                (doc_id, gzip.compress(json.dumps(doc_terms).encode('utf8'))))
+
+    def search(self, query, document_id, limit=50):
         """ Search the index for pages matching the query.
 
         :param query:   A SQLite FTS5 query
@@ -278,17 +305,27 @@ class DocumentRepository(object):
         :param limit:   Maximum number of matches to return
         :returns:       Generator that yields matches with their coordinates
         """
-        # TODO: Retrieve matching highlighted lines along with their page_id,
-        #       document_id and word_infos from index
-        # TODO: Determine the start and end index of the highlighted match
-        # TODO: Obtain word_infos for all words in range
-        # TODO: Get matching line positions along with the matching words on
-        #       that line and their coordinates
-        raise NotImplementedError
-
-    def autocomplete(self, query, limit=50):
         with self._db as cur:
-            return cur.execute(
-                "SELECT term FROM text_idx_vocab "
-                "WHERE term LIKE ? "
-                "ORDER BY cnt DESC LIMIT ?", (query + '%', limit)).fetchall()
+            matches = cur.execute(SEARCH_INSIDE, {'document_id': document_id,
+                                                  'query': query,
+                                                  'limit': limit}).fetchall()
+        for page_id, match_text, word_infos, score in matches:
+            line_infos = []
+            for combined in word_infos.split('||'):
+                if not combined:
+                    continue
+                winfos, linfo = combined.split('|')
+                linfo = LineInfo(*(int(x) if x != '' else -1
+                                   for x in linfo.split(':')))
+                winfos = tuple(
+                    WordInfo(*(int(x) if x != '' else -1
+                               for x in w.split(':')))
+                    for w in winfos.split(' ') if w)
+                line_infos.append((linfo, winfos))
+            yield page_id, match_text, line_infos
+
+    def autocomplete(self, query, document_id, min_cnt=1):
+        query = query.lower()
+        freqs = self._get_term_frequencies(document_id)
+        return ((term, freq) for term, freq in freqs.most_common()
+                if term.startswith(query) and freq >= min_cnt)
