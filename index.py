@@ -269,7 +269,7 @@ class DocumentRepository(object):
                 "WHERE document_id = ? AND page_id = ?",
                 (document_id, page_id)).fetchone()
 
-    def ingest_document(self, hocr_path):
+    def ingest_document(self, hocr_path, autocomplete_min_count=5):
         """ Ingest a new document.
 
         :param hocr_path:   path to load document from
@@ -303,11 +303,15 @@ class DocumentRepository(object):
                     for pos, ((x1, y1, x2, y2), word_cuts, line_text)
                     in enumerate(lines))
                 cur.executemany(INSERT_TRANSCRIPTION, line_vals)
+            self._update_search_index(doc_id, autocomplete_min_count)
 
-            # FIXME: This is a bit unwiedly and I'd prefer there was a nicely
-            #        scalable in-SQL solution, but unfortunately keeping the
-            #        term frequencies for each document in a table makes
-            #        the database size explode :/
+    def _update_search_index(self, doc_id, autocomplete_min_count):
+        # FIXME: This is a bit unwiedly and I'd prefer there was a nicely
+        #        scalable in-SQL solution, but unfortunately keeping the
+        #        term frequencies for each document in a table makes
+        #        the database size explode, so gzipped json-dumped counters
+        #        it is for now :/
+        with self._db as cur:
             terms_before = Counter(dict(
                 cur.execute("SELECT term, cnt FROM text_vocab").fetchall()))
             cur.execute(UPDATE_INDEX_SINGLE_DOCUMENT, {'document_id': doc_id})
@@ -317,6 +321,13 @@ class DocumentRepository(object):
                 (term, cnt_after - terms_before.get('term', 0))
                 for term, cnt_after in terms_after.items()
                 if cnt_after != terms_before.get('term')))
+            # Purge terms below threshold to save on size
+            to_purge = []
+            for term, cnt in doc_terms.items():
+                if cnt < autocomplete_min_count:
+                    to_purge.append(term)
+            for term in to_purge:
+                del doc_terms[term]
             cur.execute(
                 "INSERT INTO lexica (document_id, counter) VALUES (?, ?)",
                 (doc_id, gzip.compress(json.dumps(doc_terms).encode('utf8'))))

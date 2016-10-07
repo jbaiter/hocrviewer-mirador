@@ -240,7 +240,11 @@ def run(base_url):
 @cli.command('index')
 @click.argument('hocr-files', nargs=-1,
                 type=click.Path(dir_okay=False, exists=True, readable=True))
-def index_documents(hocr_files):
+@click.option('--autocomplete-min-count', type=int, default=5,
+              help="Only store terms with at least this frequency for "
+                   "autocomplete (going from 5 to 1 doubles the database "
+                   "size!)")
+def index_documents(hocr_files, autocomplete_min_count):
     def show_fn(hocr_path):
         if hocr_path is None:
             return ''
@@ -251,7 +255,7 @@ def index_documents(hocr_files):
     with click.progressbar(hocr_files, item_show_func=show_fn) as hocr_files:
         for hocr_path in hocr_files:
             try:
-                repository.ingest_document(hocr_path)
+                repository.ingest_document(hocr_path, autocomplete_min_count)
             except Exception as e:
                 logger.error("Could not ingest {}".format(hocr_path))
                 logger.exception(e)
