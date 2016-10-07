@@ -11,11 +11,6 @@ from itertools import count
 import lxml.etree
 from PIL import Image
 
-NAMESPACES = {'xhtml': 'http://www.w3.org/1999/xhtml'}
-XPATH_PAGE = ".//xhtml:div[@class='ocr_page']"
-XPATH_LINE = ".//xhtml:span[@class='ocr_line']"
-XPATH_WORD = ".//xhtml:span[@class='ocr_cinfo']"
-
 LineInfo = namedtuple('LineInfo', ('y_pos', 'height', 'sequence_pos'))
 WordInfo = namedtuple('WordInfo', ('sequence_pos', 'start_x', 'end_x'))
 
@@ -114,45 +109,71 @@ class HocrDocument(object):
         self.logger = logger.getChild('HocrDocument')
         self.id = book_id
         self.hocr_path = hocr_path
-        self.tree = lxml.etree.parse(str(self.hocr_path))
+        parser = lxml.etree.XMLParser(ns_clean=True, recover=True)
+        self.tree = lxml.etree.parse(str(self.hocr_path), parser)
+        is_xhtml = len(self.tree.getroot().nsmap) > 0
+        self.xpaths = {
+            'page': ".//xhtml:div[@class='ocr_page']",
+            'line': ".//xhtml:span[@class='ocr_line']",
+            'word': ".//xhtml:span[@class='ocr_cinfo']"}
+        if is_xhtml:
+            self.nsmap = {'xhtml': 'http://www.w3.org/1999/xhtml'}
+        else:
+            self.xpaths = {k: xp.replace('xhtml:', '')
+                           for k, xp in self.xpaths.items()}
+            self.nsmap = None
 
     def _parse_title(self, title):
         if title is None:
-            return
+            return {}
         return {itm.split(" ")[0]: " ".join(itm.split(" ")[1:])
                 for itm in title.split("; ")}
 
+    def _get_img_path(self, idx, title_data):
+        if 'image' in title_data:
+            return (self.hocr_path.parent / title_data['image']).resolve()
+        # Google-Style
+        img_path = self.hocr_path.parent / 'Image_{:04}.JPEG'.format(idx)
+        try:
+            return img_path.resolve()
+        except OSError:
+            raise ValueError("Could not determine image path")
+
     def get_pages(self):
-        for page_node in self.tree.iterfind(XPATH_PAGE, namespaces=NAMESPACES):
+        page_node_iter = self.tree.iterfind(self.xpaths['page'],
+                                            namespaces=self.nsmap)
+        for idx, page_node in enumerate(page_node_iter):
             title_data = self._parse_title(page_node.attrib.get('title'))
-            if title_data is None or 'image' not in title_data:
+            try:
+                img_path = self._get_img_path(idx, title_data)
+            except ValueError:
                 self.logger.debug(
-                    "Could not parse title data for page with id={} "
-                    "on book {}"
-                    .format(page_node.attrib.get('id'), self.hocr_path))
+                    "Could not find page image for page with id={} on book {}"
+                    .format(page_node.attrib.get('id', idx), self.hocr_path))
                 continue
-            img_path = (self.hocr_path.parent /
-                        title_data['image']).resolve()
             if 'bbox' not in title_data:
                 dimensions = Image.open(str(img_path)).size
             else:
                 dimensions = [
                     int(x) for x in title_data['bbox'].split()[2:]]
-            page_id = page_node.attrib['id']
+            page_id = page_node.attrib.get('id', 'page_{:04}'.format(idx))
             yield page_id, dimensions, img_path, title_data.get('imagemd5')
 
     def get_lines(self):
-        for page_node in self.tree.iterfind(XPATH_PAGE, namespaces=NAMESPACES):
-            page_id = page_node.attrib.get('id')
+        page_node_iter = self.tree.iterfind(self.xpaths['page'],
+                                            namespaces=self.nsmap)
+        for idx, page_node in enumerate(page_node_iter):
+            page_id = page_node.attrib.get('id', 'page_{:04}'.format(idx))
             lines = []
-            line_nodes = page_node.iterfind(XPATH_LINE, namespaces=NAMESPACES)
+            line_nodes = page_node.iterfind(self.xpaths['line'],
+                                            namespaces=self.nsmap)
             word_idx_gen = (str(v) for v in count())
             for line_node in line_nodes:
                 title_data = self._parse_title(
                     line_node.attrib.get('title'))
-                if title_data is None:
+                if 'bbox' not in title_data:
                     self.logger.debug(
-                        "Could not parse title data for line with id={} "
+                        "Could not determine bbox for line with id={} "
                         "on page with id={} on book {}"
                         .format(line_node.attrib.get('id'), page_id,
                                 self.hocr_path))
@@ -160,7 +181,7 @@ class HocrDocument(object):
                 else:
                     bbox = [int(v) for v in title_data['bbox'].split()]
                 word_nodes = line_node.iterfind(
-                    XPATH_WORD, namespaces=NAMESPACES)
+                    self.xpaths['word'], namespaces=self.nsmap)
                 word_cuts = []
                 for word_node in word_nodes:
                     title_data = self._parse_title(
@@ -255,6 +276,9 @@ class DocumentRepository(object):
         :type lines:        :py:class:`pathlib.Path`
         """
         doc_id = hocr_path.stem
+        if doc_id == 'hOCR':
+            # For Google Books dataset
+            doc_id = hocr_path.parent.stem
         doc = HocrDocument(doc_id, hocr_path)
         with self._db as cur:
             cur.execute(

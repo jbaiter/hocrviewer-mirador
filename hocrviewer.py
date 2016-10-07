@@ -238,14 +238,17 @@ def run(base_url):
 
 
 @cli.command('index')
-@click.argument('hocr-directory', type=click.Path(file_okay=False, exists=True,
-                                                  readable=True))
-def index_documents(hocr_directory):
-    base_directory = pathlib.Path(hocr_directory)
-    hocr_files = tuple(base_directory.glob("*.html"))
-    with click.progressbar(
-            hocr_files,
-            item_show_func=lambda p: p.stem if p else '') as hocr_files:
+@click.argument('hocr-files', nargs=-1,
+                type=click.Path(dir_okay=False, exists=True, readable=True))
+def index_documents(hocr_files):
+    def show_fn(hocr_path):
+        if hocr_path is None:
+            return ''
+        else:
+            return str(hocr_path)
+
+    hocr_files = tuple(pathlib.Path(p) for p in hocr_files)
+    with click.progressbar(hocr_files, item_show_func=show_fn) as hocr_files:
         for hocr_path in hocr_files:
             try:
                 repository.ingest_document(hocr_path)
