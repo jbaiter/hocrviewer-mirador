@@ -38,11 +38,17 @@ Example:
      title="ppageno 4; image spyri_heidi_1880/00000005.tif; bbox 0 0 2013 2985"/>
 ```
 
+Alternatively, HOCR files with accompanying images that are stored like the
+[Google 1000 Books dataset](http://commondatastorage.googleapis.com/books/icdar2007/README.txt)
+([download instructions](http://yaroslavvb.blogspot.de/2011/11/google1000-dataset_09.html))
+can be indexed and viewed as well.
+
 ## Usage
 Before the web application can be run, the HOCR files that content is to be
 served from, have to be indexed. This is for two reasons: To make the
 response times for the manifests and annotations bearable and to enable
-the search within the books (to be implemented).
+the search within the books (not yet usable from Mirador, but keep an eye
+on [this PR](https://github.com/ProjectMirador/mirador/pull/995)).
 
 To do so, run the `index` subcommand with the path to the directory with
 your HOCR  files as the first argument. By default, the database will be
@@ -69,8 +75,7 @@ The application exposes all books as [IIIF](https://iiif.io) manifests at
 for the book without the `.html` extension.
 
 ## Planned Features
-- Search inside the books via [IIIF Search API](http://iiif.io/api/search/0.9/)
-- Search across all books
+- Search across all books (backend done, user interface missing)
 - Edit OCR with a custom `AnnotationEditor` implementation for Mirador
 - Browse books in a paginated view outside of Mirador (which gets overwhelmed
   with large libraries)
