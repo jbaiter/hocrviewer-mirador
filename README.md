@@ -2,7 +2,7 @@
 
 [![Demo](https://thumbs.gfycat.com/TameThornyAsianpiedstarling-size_restricted.gif)](https://gfycat.com/TameThornyAsianpiedstarling)
 
-Read books in HOCR format with [Mirador](https://mirador-project.org).
+Read books in HOCR format with [Mirador](http://projectmirador.org/).
 
 ## Requirements
 - Python 3.5
