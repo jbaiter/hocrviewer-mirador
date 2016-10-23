@@ -75,6 +75,7 @@ The application exposes all books as [IIIF](https://iiif.io) manifests at
 for the book without the `.html` extension.
 
 ## Planned Features
+- Make indexing optional to allow for plug'n'play
 - Search across all books (backend done, user interface missing)
 - Edit OCR with a custom `AnnotationEditor` implementation for Mirador
 - Browse books in a paginated view outside of Mirador (which gets overwhelmed
