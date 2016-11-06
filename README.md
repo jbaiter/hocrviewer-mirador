@@ -65,7 +65,7 @@ subcommand (making sure that you pass the same `--db-path` value as during
 indexing).
 
 ```bash
-$ python hocrviewer.py --db-path /tmp/test.db run
+$ python hocrviewer.py --db-path /tmp/test.db serve
 ```
 
 The application exposes all books as [IIIF](https://iiif.io) manifests at
