@@ -6,7 +6,7 @@ Read books in HOCR format with [Mirador](http://projectmirador.org/).
 
 ## Requirements
 - Python 3.5
-- An SQLite version that supports FTS5 (check with
+- **Optional:** An SQLite version that supports FTS5 (check with
   `sqlite3 ":memory:" "PRAGMA compile_options;" |grep FTS5`)
 
 ## Installation
@@ -38,30 +38,34 @@ Alternatively, HOCR files with accompanying images that are stored like the
 can be indexed and viewed as well.
 
 ## Usage
-Before the web application can be run, the HOCR files that content is to be
-served from, have to be indexed. This is for two reasons: To make the
-response times for the manifests and annotations bearable and to enable
-the search within the books (not yet usable from Mirador, but keep an eye
-on [this PR](https://github.com/ProjectMirador/mirador/pull/995)).
+Simply point the application to a directory containing hOCR files and it
+will serve a web interface where you can view them:
+
+```bash
+$ python hocrviewer.py serve /mnt/data/hocr
+```
+
+You can alternatively index your files before serving them. This has two main
+advantages: It significantly reduces the response times for the manifests and
+annotations and it enable the search within the books (not yet usable from
+Mirador, but keep an eye on [this
+PR](https://github.com/ProjectMirador/mirador/pull/995)).
 
 To do so, run the `index` subcommand with the path to the directory with
-your HOCR  files as the first argument. By default, the database will be
+your HOCR files as the first argument. By default, the database will be
 written to `~/.config/hocrviewer/hocrviewer.db`, but you can override this
 with the `--db-path` option that is passed *before* the subcommand:
 
 ```bash
-$  python hocrviewer.py --db-path /tmp/test.db index /mnt/data/hocr
+$ python hocrviewer.py --db-path /tmp/test.db index /mnt/data/hocr
 ```
 
-After the index has been created, run the application with the `run` subcommand
-(making sure that you pass the same `--db-path` value as during indexing).
-If you want to expose the application on an URL other than
-`http://127.0.0.1:5000` (e.g. because you're using a reverse proxy), specify
-the full URL that is to be externally visible with the `--base-url` option
-(e.g. `--base-url http://example.com/hocrviewer`).
+After the index has been created, run the application with the `serve`
+subcommand (making sure that you pass the same `--db-path` value as during
+indexing).
 
 ```bash
-$ python hocrviewer.py --db-path /tmp/test.db run --base-url "http://127.0.0.1:5000"
+$ python hocrviewer.py --db-path /tmp/test.db run
 ```
 
 The application exposes all books as [IIIF](https://iiif.io) manifests at
