@@ -6,18 +6,12 @@ Read books in HOCR format with [Mirador](http://projectmirador.org/).
 
 ## Requirements
 - Python 3.5
-- NodeJS with `npm`, `bower` and `grunt` installed (for Mirador)
 - An SQLite version that supports FTS5 (check with
   `sqlite3 ":memory:" "PRAGMA compile_options;" |grep FTS5`)
 
 ## Installation
 ```bash
 $ pip install -r requirements.txt
-$ git submodule update --init --recursive vendor/mirador
-$ cd vendor/mirador
-$ npm install
-$ bower install
-$ grunt
 ```
 
 ## Data format
