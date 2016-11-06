@@ -3,13 +3,16 @@ import json
 import logging
 import re
 import sqlite3
-from collections import Counter, namedtuple
+from collections import Counter, namedtuple, OrderedDict
 from contextlib import contextmanager
 from functools import lru_cache
 from itertools import count
 
 import lxml.etree
 from PIL import Image
+
+LineInfo = namedtuple('LineInfo', ('y_pos', 'height', 'sequence_pos'))
+WordInfo = namedtuple('WordInfo', ('sequence_pos', 'start_x', 'end_x'))
 
 LineInfo = namedtuple('LineInfo', ('y_pos', 'height', 'sequence_pos'))
 WordInfo = namedtuple('WordInfo', ('sequence_pos', 'start_x', 'end_x'))
@@ -169,6 +172,8 @@ class HocrDocument(object):
                                             namespaces=self.nsmap)
             word_idx_gen = (str(v) for v in count())
             for line_node in line_nodes:
+                if 'not_aligned' in line_node.attrib.get('class').split():
+                    continue
                 title_data = self._parse_title(
                     line_node.attrib.get('title'))
                 if 'bbox' not in title_data:
@@ -195,17 +200,94 @@ class HocrDocument(object):
                 text = re.sub(r'\s{2,}', ' ',
                               "".join(line_node.itertext()).strip())
                 if text:
-                    lines.append((bbox, word_cuts, text))
+                    lines.append((text, bbox, word_cuts))
             yield page_id, lines
 
 
-class DocumentRepository(object):
+def get_doc_id(hocr_path):
+    doc_id = hocr_path.stem
+    if doc_id == 'hOCR':
+        # For Google Books dataset
+        doc_id = hocr_path.parent.stem
+    return doc_id
+
+
+class FilesystemRepository(object):
+    def __init__(self, base_directory):
+        self._base_dir = base_directory
+
+    def document_ids(self):
+        return [get_doc_id(p) for p in self._base_dir.glob("**/*.html")]
+
+    @lru_cache()
+    def _read_document(self, document_id):
+        doc_path = self._get_doc_path(document_id)
+        if doc_path is None:
+            return None
+        doc = HocrDocument(document_id, doc_path)
+        lines = OrderedDict()
+        for pid, ls in doc.get_lines():
+            lines[pid] = [(text, x1, y1, x2-x1, y2-y1)
+                          for text, (x1, y1, x2, y2), _ in ls]
+        return {
+            'id': doc.id,
+            'hocr_path': doc.hocr_path,
+            'pages': OrderedDict([
+                (pid, {'id': pid,
+                       'dimensions': dimensions,
+                       'img_path': img_path,
+                       'img_md5': img_md5,
+                       'lines': lines[pid]})
+                for pid, dimensions, img_path, img_md5 in doc.get_pages()])}
+
+    def _get_doc_path(self, doc_id):
+        fpath = self._base_dir / (doc_id + ".html")
+        if not fpath.exists():
+            fpath = self._base_dir / doc_id / "hOCR.html"
+        if not fpath.exists():
+            return None
+        else:
+            return fpath
+
+    def get_document(self, document_id):
+        fpath = self._get_doc_path(document_id)
+        if fpath:
+            return (document_id, str(fpath), None)
+
+    def get_image_path(self, document_id, page_id):
+        doc = self._read_document(document_id)
+        if doc is not None and page_id in doc['pages']:
+            return doc['pages'][page_id]['img_path']
+
+    def get_lines(self, document_id, page_id):
+        doc = self._read_document(document_id)
+        if doc is not None and page_id in doc['pages']:
+            return doc['pages'][page_id]['lines']
+
+    def get_pages(self, document_id):
+        doc = self._read_document(document_id)
+        if doc is not None:
+            return [
+                (pid, p['img_path'], p['dimensions'][0], p['dimensions'][1])
+                for pid, p in doc['pages'].items()]
+
+    def get_page(self, document_id, page_id):
+        doc = self._read_document(document_id)
+        if doc is not None and page_id in doc['pages']:
+            p = doc['pages'][page_id]
+            return (page_id, p['img_path'], p['dimensions'][0],
+                    p['dimensions'][1])
+
+
+class DatabaseRepository(object):
     def __init__(self, db_path):
         """ Local document index using SQLite.
 
         :param db_path: Path to the database file
         :type db_path:  :py:class:`pathlib.Path`
         """
+        if not db_path.parent.exists():
+            db_path.parent.mkdir(parents=True)
         init_db = not db_path.exists()
         self.db_path = db_path
         if init_db:
@@ -275,10 +357,7 @@ class DocumentRepository(object):
         :param hocr_path:   path to load document from
         :type lines:        :py:class:`pathlib.Path`
         """
-        doc_id = hocr_path.stem
-        if doc_id == 'hOCR':
-            # For Google Books dataset
-            doc_id = hocr_path.parent.stem
+        doc_id = get_doc_id(hocr_path)
         doc = HocrDocument(doc_id, hocr_path)
         with self._db as cur:
             cur.execute(
@@ -300,10 +379,10 @@ class DocumentRepository(object):
                          pos_x=x1, pos_y=y1,
                          width=x2-x1 if x1 and x2 else None,
                          height=y2-y1 if x1 and x2 else None)
-                    for pos, ((x1, y1, x2, y2), word_cuts, line_text)
+                    for pos, (line_text, (x1, y1, x2, y2), word_cuts)
                     in enumerate(lines))
                 cur.executemany(INSERT_TRANSCRIPTION, line_vals)
-            self._update_search_index(doc_id, autocomplete_min_count)
+        self._update_search_index(doc_id, autocomplete_min_count)
 
     def _update_search_index(self, doc_id, autocomplete_min_count):
         # FIXME: This is a bit unwiedly and I'd prefer there was a nicely
