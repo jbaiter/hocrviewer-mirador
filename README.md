@@ -47,7 +47,7 @@ $ python hocrviewer.py serve /mnt/data/hocr
 
 You can alternatively index your files before serving them. This has two main
 advantages: It significantly reduces the response times for the manifests and
-annotations and it enable the search within the books (not yet usable from
+annotations and it enables the search within the books (not yet usable from
 Mirador, but keep an eye on [this
 PR](https://github.com/ProjectMirador/mirador/pull/995)).
 
@@ -73,7 +73,6 @@ The application exposes all books as [IIIF](https://iiif.io) manifests at
 for the book without the `.html` extension.
 
 ## Planned Features
-- Make indexing optional to allow for plug'n'play
 - Search across all books (backend done, user interface missing)
 - Edit OCR with a custom `AnnotationEditor` implementation for Mirador
 - Browse books in a paginated view outside of Mirador (which gets overwhelmed
