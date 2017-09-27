@@ -22,7 +22,7 @@ SearchHit = namedtuple("SearchHit",
                        ("match", "before", "after", "annotations"))
 
 
-app = flask.Flask('hocrviewer', static_folder='vendor/mirador/build/mirador',
+app = flask.Flask('hocrviewer', static_folder='./vendor/mirador',
                   static_url_path='/static')
 ext = IIIF(app=app)
 api = Api(app=app)
@@ -273,7 +273,14 @@ def autocomplete_in_book(book_id):
 @app.route('/')
 def index():
     return flask.render_template(
-        'mirador.html', book_ids=repository.document_ids())
+        'index.html', book_ids=repository.document_ids())
+
+
+@app.route('/view/<book_id>')
+def view(book_id):
+    return flask.render_template(
+        'mirador.html',
+        manifest_uri=flask.url_for('get_book_manifest', book_id=book_id))
 
 
 @click.group()

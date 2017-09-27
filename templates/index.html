@@ -1,0 +1,9 @@
+<html>
+  <body>
+    <ul>
+      {% for book_id in book_ids %}
+      <li><a href="/view/{{ book_id }}">{{ book_id }}</a></li>
+      {% endfor %}
+    </ul>
+  </body>
+</html>

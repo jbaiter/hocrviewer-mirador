@@ -1,0 +1,23 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+    <title>HOCR Viewer</title>
+  </head>
+  <body>
+    <section class="books_list">
+      {% for book in books %}
+        <div class="book_container">
+          <a class="thumb" href="{{ url_for('view', book_id=book.id) }}">
+            <img src="/iiif/image/v2/{{ book.id }}:page_0000/full/200,/0/default.jpg">
+          </a>
+          <dl class="book_info">
+            <dt>ID</dt> <dd>{{ book.id }}</dd>
+            <dt>Number of pages:</dt> <dd>{{ book.num_pages }}</dd>
+          </dl>
+        </div>
+      {% endfor %}
+    </section>
+  </body>
+</html>

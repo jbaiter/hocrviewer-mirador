@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
-    <link rel="stylesheet" type="text/css" href="static/css/mirador-combined.css">
+    <link rel="stylesheet" type="text/css" href="/static/css/mirador-combined.css">
     <title>HOCR Viewer</title>
     <style type="text/css">
      #viewer {
@@ -16,26 +16,44 @@
   <body>
     <div id="viewer"></div>
 
-    <script src="static/mirador.js"></script>
+    <script src="/static/mirador.js"></script>
     <script type="text/javascript">
-
-     $(function() {
-       Mirador({
-         "id": "viewer",
-         "layout": "1x1",
-         "buildPath": "/static/",
-         "saveSession": true,
-          "annotationEndpoint": {
-            "name":"Local Storage",
-            "module": "LocalStorageEndpoint" },
-         "data": [
-           {% for book_id in book_ids %}
-           { "manifestUri": {{ url_for('get_book_manifest', book_id=book_id)|tojson }},
-             "location": "Local"},
-           {% endfor %}
-         ],
-       });
-     });
+    (function() {
+      window.mirador = Mirador({
+        'buildPath': '/static/',
+        "id": "viewer",
+        "workspaceType": "singleObject",
+        'mainMenuSettings': {
+          'show': true,
+          'buttons': {
+            'bookmark': false,
+            'layout': false
+          },
+          'userLogo': {
+            'label': 'Mirador',
+            'attributes': { 'href': 'http://projectmirador.org/' }
+          }
+        },
+        "layout": "1x1",
+        "data": [{"manifestUri": "{{ manifest_uri }}"}],
+        "windowObjects": [
+          {
+            "loadedManifest": '{{ manifest_uri }}',
+            "viewType": "ImageView",
+            "layoutOptions": {
+              "close": false,
+              "slotRight": false,
+              "slotLeft": false,
+              "slotAbove": false,
+              "slotBelow": false
+            },
+            "sidePanelOptions": {
+              "toc" : true,
+            },
+            "saveSession": false
+          }]
+      });
+    })();
     </script>
   </body>
 </html>
