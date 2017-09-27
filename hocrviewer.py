@@ -94,7 +94,7 @@ class HocrViewerApplication(gunicorn.app.base.BaseApplication):
 def build_manifest(book_id, book_path, metadata, pages):
     fac = ManifestFactory()
     base_url = flask.request.url_root[:-1]
-    fac.set_base_metadata_uri(
+    fac.set_base_prezi_uri(
         base_url + flask.url_for('get_book_manifest', book_id=book_id))
     fac.set_base_image_uri(base_url + '/iiif/image/v2')
     fac.set_iiif_image_info(2.0, 2)
@@ -158,9 +158,14 @@ def get_page_lines(book_id, page_id):
             "Could not find lines for page '{}' in book '{}'"
             .format(page_id, book_id), 404)
     fac = ManifestFactory()
-    fac.set_base_metadata_uri(
-        flask.request.url_root[:-1] + '/iiif/' + book_id)
-    annotation_list = fac.annotationList(ident=page_id)
+    fac.set_base_prezi_uri(
+        flask.request.url_root[:-1] + '/iiif/' + book_id + '/' + page_id)
+    annotation_list = fac.annotationList(ident=book_id + '/' + page_id)
+    # FIXME: Workaround for a really stupid bug in iiif-prezi:
+    # The library sets .resources as a class-attribute, which is why:
+    #   - it will not get serialized during toJSON
+    #   - multiple instances share their resources
+    annotation_list.resources = []
     for idx, (text, x, y, w, h) in enumerate(lines):
         anno = annotation_list.annotation(ident='line-{}'.format(idx))
         anno.text(text=text)
