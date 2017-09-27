@@ -290,7 +290,6 @@ def view(book_id):
 
 @click.group()
 @click_log.simple_verbosity_option()
-@click_log.init()
 @click.pass_context
 @click.option('-db', '--db-path', help='Target path for application database',
               type=click.Path(dir_okay=False, readable=True, writable=True),
